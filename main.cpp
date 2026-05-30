@@ -11,7 +11,16 @@ typedef std::string str_t;
 typedef std::vector<double> wave_t;
 typedef std::vector<double> score_t;
 
+struct fullScore{
+    score_t melody;
+    score_t back;
+};
+
 void print(str_t s){
+    std::cout << s << std::endl;
+}
+
+void print(double s){
     std::cout << s << std::endl;
 }
 
@@ -20,6 +29,55 @@ void compressor(wave_t& wave,double peak){
     for(auto& sample : wave){
         sample /= peak;
     }
+}
+
+fullScore createkirakira(){
+    double semitone = std::pow(2,1.0/12.0);
+    double a = 440;
+    double b = a * std::pow(semitone,2);
+    double c = a * std::pow(semitone,3);
+    double d = a * std::pow(semitone,5);
+    double e = a * std::pow(semitone,7);
+    double f = a * std::pow(semitone,8);
+    double g = a * std::pow(semitone,10);
+
+    
+    score_t melody1 = {
+        c,c,g,g,2*a,2*a,g, //ドドソソララソ
+        f,f,e,e,d,d,c //ファファミミレレド
+    };
+    score_t melody2 = {
+        g,g,f,f,e,e,d
+    };
+    score_t back1 = {
+        c/4,e/2,f/2,e/2,
+        d/2,c/2,b/2,c/2
+    };
+    score_t back2 = {
+        e/2,d/2,c/2,b/2
+    };
+    
+    fullScore kirakira;
+    int i,bin=6; // 6 = 0b0110
+    for(i=0;i<4;i++){
+        if((bin>>i) & 1)for(auto x: melody2)kirakira.melody.push_back(x);
+        else for(auto x: melody1)kirakira.melody.push_back(x);
+    }
+    for(i=0;i<4;i++){
+        if((bin>>i) & 1){
+            for(auto x: back2){
+                kirakira.back.push_back(x);
+                kirakira.back.push_back(g/4);
+            }
+        }
+        else {
+            for(auto x: back1){
+                kirakira.back.push_back(x);
+                kirakira.back.push_back(g/4);
+            }
+        }
+    }
+    return kirakira;
 }
 
 class WaveExporter{
@@ -72,7 +130,7 @@ class Wave{
     void add(wave_t wave2){
         for(auto x : wave2){
             wave.push_back(x);
-            if(peak<x) peak = x;
+            if(peak<x) peak = abs(x);
         }
     }
     void mix(wave_t wave2){
@@ -99,32 +157,51 @@ class Wave{
 
 class Synth{
     private:
-    wave_t createSinWave(double freq, int duration){
-        wave_t wave(duration);
+    str_t type;
 
-        for(int i=0;i<duration;i++){
+    double calcSample(double lambda, double freq, int i){
+        if(type == "SINE"){
             double t = double(i)/SAMPLE_RATE;
-            wave[i] = (double)std::sin(2.0*PI * freq * t);
+            return (double)std::sin(2.0*PI * freq * t);
+        }else if(type == "SQUARE"){
+            if(std::fmod(i,lambda) < (lambda/2)) return 1;
+            else return -1;
+        }else if(type == "TRIANGLE"){
+            if(std::fmod(i,lambda) < (lambda/2)){
+                return (std::fmod(i,lambda)/(lambda/2))*2-1;
+            }
+            else return 1-((std::fmod(i,lambda)/(lambda/2)-1)*2);
+        }else if(type == "SAW"){
+            return (std::fmod(i,lambda)/(lambda))*2-1;
+        }else {
+            return 0;
         }
-        return wave;
     }
-
-    wave_t createSquareWave(double freq, int duration){
+    
+    wave_t createWave(double freq,int duration){
         wave_t wave(duration);
+        int length = round(duration * 0.9);
         double lambda = SAMPLE_RATE/freq;
-        for(int i=0;i<duration;i++){
-            if(std::fmod(i,lambda) < (lambda/2)) wave[i] = 1;
-            else wave[i] = -1;
+
+        for(int i=0;i<length;i++){
+            wave[i] = calcSample(lambda,freq,i);
         }
+
         return wave;
     }
 
     public:
-    wave_t oscillator(str_t type, double freq, double time){
+    Synth(str_t new_type="SINE"){
+        type = new_type;
+    }
+
+    void typeChange(str_t new_type){
+        type = new_type;
+    }
+
+    wave_t oscillator(double freq, double time){
         int duration = static_cast<int>(time * SAMPLE_RATE);
-        if(type == "SINE") return createSinWave(freq,duration);
-        else if(type == "SQUARE") return createSquareWave(freq,duration);
-        return createSinWave(freq,duration);
+        return createWave(freq,duration);
     }
 };
 
@@ -132,39 +209,27 @@ int main(void){
     const str_t path = "./01.wav";
     Wave wave01;
     Wave wave02;
-    Synth synth01;
+    Synth synth01("SQUARE");
+    Synth synth02("TRIANGLE");
 
-    double semitone = std::pow(2,1.0/12.0);
-    double a = 440;
-    double b = a * std::pow(semitone,2);
-    double c = a * std::pow(semitone,3);
-    double d = a * std::pow(semitone,5);
-    double e = a * std::pow(semitone,7);
-    double f = a * std::pow(semitone,8);
-    double g = a * std::pow(semitone,10);
-
+    // score & tempo section
+    fullScore kirakira = createkirakira();
+    
     double mini = 1.0/2.0;
     double crot = 1.0/4.0;
-    score_t melody = {
-        c,c,g,g,2*a,2*a,g, //ドドソソララソ
-        f,f,e,e,d,d,c //ファファミミレレド
-    };
-    score_t back = {
-        c/4,e/4,f/4,e/4,
-        d/4,c/4,b/4,c/4
-    };
 
+    // synth
     int i=1;
-    for(auto x: melody){
-        if(i % 7) wave01.add(synth01.oscillator("SINE",x,crot));
-        else wave01.add(synth01.oscillator("SINE",x,mini));
+    for(auto x: kirakira.melody){
+        if(i % 7) wave01.add(synth01.oscillator(x,crot));
+        else wave01.add(synth01.oscillator(x,mini));
         i++;
     }
 
-    for(auto x: back){
-        wave02.add(synth01.oscillator("SQUARE",x,mini));
+    for(auto x: kirakira.back){
+        wave02.add(synth02.oscillator(x,crot));        
     }
-    wave02.volume(0.5);
+    wave02.volume(1.5);
 
     //mix & mastering
     wave01.mix(wave02.wave);
