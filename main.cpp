@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #define SAMPLE_RATE 44100
 #define PI 3.1415926535897932384626433832795028841971
 
@@ -28,6 +29,16 @@ struct fullScore{
     int tempo;
     std::map<str_t,notes_t> parts;
 };
+
+struct Player_prop{
+    str_t part;
+    str_t osc_type;
+    str_t inst_type;
+    double opt_1;
+    double opt_2;
+};
+
+typedef std::map<str_t,Player_prop> playerMap_t;
 
 // Debug
 void print(str_t s){
@@ -216,13 +227,9 @@ class Filter{
     protected:
     double cutoff;
     double last_x;
-    
-    /*
-    public:
-    Filter(const double& hz){
-        cutoff = hz / SAMPLE_RATE;
-        last_x = 0;
-    }*/
+    double lpfilter(double x){
+        return cutoff * x + (1-cutoff) * last_x;
+    }
 };
 
 class LPFilter:public Filter{
@@ -233,7 +240,7 @@ class LPFilter:public Filter{
     }
 
     double process(double x){
-        x = cutoff * x +(1-cutoff) * last_x;
+        x = lpfilter(x);
         last_x = x;
         return x;
     }
@@ -247,7 +254,7 @@ class HPFilter:public Filter{
     }
 
     double process(double x){
-        double lp_out = cutoff * x +(1-cutoff) * last_x;
+        double lp_out = lpfilter(x);
         x -= lp_out;
         last_x = lp_out;
         return x;
@@ -260,11 +267,11 @@ class Synth{
     Amplifier amp;
 
     public:
-    /*Synth(const str_t& osc_type="SINE"){
+    Synth(const str_t& osc_type="SINE"){
         osc.typeChange(osc_type);
-    }*/
+    }
 
-    Wave play(const double& freq, const int& duration,const double vel = 72){
+    virtual Wave play(const double& freq, const int& duration,const double vel = 72, const double lp_mix = 0.2, const double hp_mix = 0.2){
         Wave wave = osc.oscillator(freq,duration,vel);
         return wave;
     }
@@ -276,7 +283,7 @@ class RegularSynth:public Synth{
         osc.typeChange(osc_type);
     }
 
-    Wave play(const double& freq, const int& duration,const double vel = 72,const double lp_mix = 0.2, const double hp_mix = 0.2){
+    Wave play(const double& freq, const int& duration,const double vel = 72,const double lp_mix = 0.2, const double hp_mix = 0.2) override {
         Wave wave = osc.oscillator(freq,duration,vel);
         LPFilter lp_filter(freq);
         HPFilter hp_filter(freq);
@@ -297,14 +304,13 @@ class HarmonicSynth:public Synth{
         osc.typeChange(osc_type);
     }
 
-    Wave play(const double& freq, const int& duration,const double vel = 72,const double overtone_limit = 16){
+    Wave play(const double& freq, const int& duration,const double vel = 72,const double overtone_limit = 16, const double lp_mix = 0.3) override {
         Wave wave,overtone;
         LPFilter lp_filter(freq);
-        double lp_mix=0.3;
 
         for(int i=1;i<=overtone_limit;i++){
             overtone = osc.oscillator(i*freq,duration,vel);
-            double gain = (1.0/(2+i^2)) / 2.0;
+            double gain = (1.0/(2+i*i)) / 2.0;
             for(int j=0;j<overtone.wave.size();j++){
                 overtone.wave[j] *= gain;
             }
@@ -360,42 +366,6 @@ class Musician{ //knowledge
 
 class Composer:public Musician{
     private:
-    void makeMelody(fullScore& kirakira){
-        int i,j,bin=0b0110;
-        score_t melody1 = {
-            "C","C","G","G","A","A","G", //ドドソソララソ
-            "F","F","E","E","D","D","C" //ファファミミレレド
-        };
-        score_t melody2 = {
-            "G","G","F","F","E","E","D"
-        };
-
-        for(i=0;i<4;i++){
-            if((bin>>i) & 1){
-                j=1;
-                for(auto x: melody2){
-                    kirakira.parts["melody"].push_back({
-                        note_num(pcset(x)),
-                        j % 7 ? 4.0 : 2.0,
-                        72
-                    });
-                    j++;
-                }
-            }
-            else {
-                j=1;
-                for(auto x: melody1){
-                    kirakira.parts["melody"].push_back({
-                        note_num(pcset(x)),
-                        j % 7 ? 4.0 : 2.0,
-                        72
-                    });
-                    j++;
-                }
-            };
-        }
-    }
-
     bool isCmaj(const int& note){
         int pc = note%12;
         std::vector<int> diatonic = {0,2,4,5,7,9,11};
@@ -455,42 +425,85 @@ class Composer:public Musician{
         });
     }
 
-    void makeSub(fullScore& kirakira){
-        int i,j,bin=0b0110;
-        for(i=0;i<4;i++){
-            if((bin>>i) & 1){
-                Sub_type1(kirakira,"E",5,"C",5,"H",4);
-                Sub_type1(kirakira,"D",5,"H",4,"B",4);
-                Sub_type1(kirakira,"C",5,"A",4,"As",4);
-                Sub_type1(kirakira,"H",4,"G",4,"Ges",4);
-            }
-            else {
-                Sub_type1(kirakira,"E",5,"C",5,"H",4);
-                Sub_type1(kirakira,"A",5,"G",5,"Ges",5);
-                Sub_manual(kirakira,
-                    "As",5,"A",5,"C",6,"H",5,
-                    "D",6,"C",6,"H",5,"A",5
-                );
-                
-                Sub_type2(kirakira,"A",5,"E",6);
-                Sub_type2(kirakira,"G",5,"D",6);
-                Sub_type2(kirakira,"F",5,"C",6);
-
-                Sub_manual(kirakira,
-                    "D",5,"D",5,"A",5,"A",5,
-                    "G",5,"G",5,"H",4,"H",4
-                );
-                kirakira.parts["sub"].push_back({
-                    note_num(pcset("C"),5),
-                    2,
-                    72
-                });
-            }
+    void make_melody(fullScore& kirakira,score_t melody){
+        int j=1;
+        for(auto x: melody){
+            kirakira.parts["melody"].push_back({
+                note_num(pcset(x)),
+                j % 7 ? 4.0 : 2.0,
+                72
+            });
+            j++;
         }
     }
 
-    void makeBass(fullScore& kirakira){
-        int i,j,bin=0b0110;
+    void make_subA(fullScore& kirakira){
+        Sub_type1(kirakira,"E",5,"C",5,"H",4);
+        Sub_type1(kirakira,"A",5,"G",5,"Ges",5);
+        Sub_manual(kirakira,
+            "As",5,"A",5,"C",6,"H",5,
+            "D",6,"C",6,"H",5,"A",5
+        );
+                
+        Sub_type2(kirakira,"A",5,"E",6);
+        Sub_type2(kirakira,"G",5,"D",6);
+        Sub_type2(kirakira,"F",5,"C",6);
+
+        Sub_manual(kirakira,
+            "D",5,"D",5,"A",5,"A",5,
+            "G",5,"G",5,"H",4,"H",4
+        );
+        kirakira.parts["sub"].push_back({
+            note_num(pcset("C"),5),
+            2,
+            72
+        });
+    }
+
+    void make_subB(fullScore& kirakira){
+        Sub_type1(kirakira,"E",5,"C",5,"H",4);
+        Sub_type1(kirakira,"D",5,"H",4,"B",4);
+        Sub_type1(kirakira,"C",5,"A",4,"As",4);
+        Sub_type1(kirakira,"H",4,"G",4,"Ges",4);
+    }
+
+    void make_bass(fullScore& kirakira,score_t bass,int count_down){
+        int j=1;
+        for(auto x: bass){
+            kirakira.parts["bass"].push_back({
+                note_num(pcset(x),j%count_down?4:3),
+                4,
+                72
+            });
+            kirakira.parts["bass"].push_back({
+                43,
+                4,
+                72
+            });
+            j++;
+        }
+    }
+
+    void make_A(fullScore& kirakira,score_t melody2,score_t bass2){
+        make_melody(kirakira,melody2);
+        make_subA(kirakira);
+        make_bass(kirakira,bass2,7);
+    }
+    void make_B(fullScore& kirakira,score_t melody1,score_t bass1){
+        make_melody(kirakira,melody1);
+        make_subB(kirakira);
+        make_bass(kirakira,bass1,4);
+    }
+
+    void makeKirakira(fullScore& kirakira){
+        int i,bin=0b0110;
+        score_t melody1 = {
+            "C","C","G","G","A","A","G", //ドドソソララソ
+            "F","F","E","E","D","D","C" //ファファミミレレド
+        };
+        score_t melody2 = {
+            "G","G","F","F","E","E","D"
+        };
         score_t bass1 = {
             "C","E","F","E",
             "D","C","H","C"
@@ -501,89 +514,68 @@ class Composer:public Musician{
 
         for(i=0;i<4;i++){
             if((bin>>i) & 1){
-                j=1;
-                for(auto x: bass2){
-                    kirakira.parts["bass"].push_back({
-                        note_num(pcset(x),j % 4 ? 4 : 3),
-                        4,
-                        72
-                    });
-                    kirakira.parts["bass"].push_back({
-                        43,
-                        4,
-                        72
-                    });
-                    j++;
-                }
+                make_B(kirakira,melody2,bass2);
             }
             else {
-                j=0;
-                for(auto x: bass1){
-                    kirakira.parts["bass"].push_back({
-                        note_num(pcset(x),j%6?4:3),
-                        4,
-                        72
-                    });
-                    kirakira.parts["bass"].push_back({
-                        43,
-                        4,
-                        72
-                    });
-                    j++;
-                }
+                make_A(kirakira,melody1,bass1);
             }
         }
     }
+
     public:
     fullScore createkirakira(){
         fullScore kirakira;
         kirakira.tempo = 132;
         
-        makeMelody(kirakira);
-        makeSub(kirakira);
-        makeBass(kirakira);
+        makeKirakira(kirakira);
+
         return kirakira;
     }
 };
 
 class Player:public Musician{
     private:
+    str_t name;
     str_t part;
     str_t inst_type;
     str_t osc_type;
-    double a;
-    double b;
+    double opt_a;
+    double opt_b;
+
     public:
-    Player(const str_t& new_part){
+    Player(const str_t _name, const str_t& new_part){
+        name = _name;
         part = new_part;
+    }
+    str_t get_part(){
+        return part;
     }
     void get_instrument(const str_t& _osc_type, const str_t& _inst_type, double _a,double _b=0){
         osc_type = _osc_type;
         inst_type = _inst_type;
-        a = _a;
-        b = _b;
+        opt_a = _a;
+        opt_b = _b;
     }
     Wave play(fullScore& kirakira){
         Wave wave;
-        RegularSynth r_inst(osc_type);
-        HarmonicSynth h_inst(osc_type);
+        std::unique_ptr<Synth> inst;
+        if(inst_type == "REGULAR")
+            inst = std::make_unique<RegularSynth>(osc_type);
+        else if(inst_type == "HARMONIC")
+            inst = std::make_unique<HarmonicSynth>(osc_type);
+        else inst = std::make_unique<Synth>(osc_type); 
 
         double semitone = std::pow(2,1.0/12.0);
         double freq;
-
-        int tempo = 132;
         double time;
 
         for(int i=0;i<kirakira.parts[part].size();i++){
             note& note = kirakira.parts[part][i];
             freq = concert_pitch * std::pow(semitone,note.num - 57 );
-            time = 240 / (tempo * note.len);
+            time = 240 / (kirakira.tempo * note.len);
             int duration = static_cast<int>(time * SAMPLE_RATE);
-        
-            if(inst_type == "REGULAR")
-                wave.add(r_inst.play(freq,duration,note.vel,a,b));
-            else if(inst_type == "HARMONIC")
-                wave.add(h_inst.play(freq,duration,note.vel,a));
+            
+            wave.add(inst->play(freq,duration,note.vel,opt_a,opt_b));
         }
         return wave;
     }
@@ -596,32 +588,31 @@ int main(void){
     fullScore kirakira = Chopin.createkirakira();
 
     // play
-    Player Sakana("melody");
-    Player Neko("sub");
-    Player Kurage("bass");
+    playerMap_t players_props = {
+        {"Sakana",{"melody","SQUARE","HARMONIC",8,0.2}},
+        {"Neko",{"sub","SINE","REGULAR",0.2,0.8}},
+        {"Kurage",{"bass","TRIANGLE","REGULAR",0.6,0.1}}
+    };
 
-    Sakana.get_instrument("SQUARE","HARMONIC",8);
-    Neko.get_instrument("SINE","REGULAR",0.2,0.8);
-    Kurage.get_instrument("TRIANGLE","REGULAR",0.6,0.1);
-
-    Wave sound_s(Sakana.play(kirakira));
-    Wave sound_n(Neko.play(kirakira));
-    Wave sound_k(Kurage.play(kirakira));
-
-    sound_k.volume(2);
+    std::map<str_t,std::unique_ptr<Wave>> waves;
+    for(const auto& [name, props]: players_props){
+        std::unique_ptr<Player> p;
+        p = std::make_unique<Player>(name,props.part);
+        p->get_instrument(props.osc_type,props.inst_type,props.opt_1,props.opt_2);
+        waves[p->get_part()] =std::make_unique<Wave>(p->play(kirakira));
+    }
+    waves.at("bass")->volume(1.5);
 
     // mix & mastering
     Wave master;
-    master.mix(sound_s);
-    master.mix(sound_n);
-    master.mix(sound_k);
-    print(sound_s.getPeak());
-    print(sound_n.getPeak());
-    print(sound_k.getPeak());
+    for(const auto& [key,wave]: waves){
+        master.mix(*wave);
+        print(wave->getPeak());
+    }
 
     compressor(master);
     master.volume(0.4);
-    master.exportFile(path);   
-    
+    master.exportFile(path);
+
     return 0;
 }
